@@ -1,0 +1,104 @@
+# Solvia.Nova OS — PRODUCTION stack.
+#
+# Required once on the server (never commit real values):
+#   1. cp .env.example .env, then set: APP_KEY, APP_URL, DB_USERNAME (NON-root),
+#      DB_PASSWORD, DB_ROOT_PASSWORD. Generate the key locally once:
+#      php artisan key:generate --show
+#   2. NOTE: a `$` in any compose-interpolated value must be written as `$$`.
+#
+# First deploy / updates:
+#   docker compose up --build -d
+#   docker compose exec app php artisan migrate --force --seed   # first deploy only
+#   docker compose exec app php artisan migrate --force          # updates (or RUN_MIGRATIONS=true)
+#
+# App: http://localhost:8000 (put TLS terminator / reverse proxy in front for public traffic).
+# MySQL is bound to 127.0.0.1 only — reachable from the server, not the internet.
+
+x-app-env: &app-env
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: "${APP_URL:?Set APP_URL to your public domain, e.g. https://nova.example.com}"
+  APP_KEY: "${APP_KEY:?Generate once via 'php artisan key:generate --show' and set APP_KEY}"
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: "3306"
+  DB_DATABASE: "${DB_DATABASE:-novaos}"
+  DB_USERNAME: "${DB_USERNAME:?Set DB_USERNAME to a NON-root MySQL user, e.g. novaos}"
+  DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD for DB_USERNAME}"
+  RUN_MIGRATIONS: "${RUN_MIGRATIONS:-false}"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:80"
+    env_file:
+      - .env
+    environment:
+      <<: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - storage-data:/var/www/html/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Background jobs (QUEUE_CONNECTION=database is the image default).
+  # --max-time recycles the worker hourly against memory leaks; restart policy brings it back.
+  worker:
+    build: .
+    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3", "--max-time=3600"]
+    env_file:
+      - .env
+    environment:
+      <<: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - storage-data:/var/www/html/storage
+    restart: unless-stopped
+
+  # Laravel scheduler — fires routes/console.php jobs (os:run-engines reminders/health/automation).
+  scheduler:
+    build: .
+    command: ["php", "artisan", "schedule:work"]
+    env_file:
+      - .env
+    environment:
+      <<: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - storage-data:/var/www/html/storage
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - "127.0.0.1:3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD (server root pw, used for backups/maintenance)}"
+      MYSQL_DATABASE: "${DB_DATABASE:-novaos}"
+      MYSQL_USER: "${DB_USERNAME:?Must match DB_USERNAME above and must NOT be 'root'}"
+      MYSQL_PASSWORD: "${DB_PASSWORD:?Must match DB_PASSWORD above}"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  db-data:
+  storage-data:
