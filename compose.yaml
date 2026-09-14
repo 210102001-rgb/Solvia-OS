@@ -27,9 +27,20 @@ x-app-env: &app-env
   DB_PASSWORD: "${DB_PASSWORD:?Set DB_PASSWORD for DB_USERNAME}"
   RUN_MIGRATIONS: "${RUN_MIGRATIONS:-false}"
 
+# Regional mirror overrides for the image build (empty = official mirrors).
+# Needed on VPS where deb.debian.org / registry.npmjs.org are unreachable,
+# e.g. Tencent Cloud China: APT_MIRROR=mirrors.tencent.com
+# NPM_REGISTRY=https://registry.npmmirror.com
+x-build-args: &build-args
+  APT_MIRROR: "${APT_MIRROR:-}"
+  NPM_REGISTRY: "${NPM_REGISTRY:-}"
+
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        <<: *build-args
     ports:
       - "8000:80"
     env_file:
@@ -52,7 +63,10 @@ services:
   # Background jobs (QUEUE_CONNECTION=database is the image default).
   # --max-time recycles the worker hourly against memory leaks; restart policy brings it back.
   worker:
-    build: .
+    build:
+      context: .
+      args:
+        <<: *build-args
     command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3", "--max-time=3600"]
     env_file:
       - .env
@@ -67,7 +81,10 @@ services:
 
   # Laravel scheduler — fires routes/console.php jobs (os:run-engines reminders/health/automation).
   scheduler:
-    build: .
+    build:
+      context: .
+      args:
+        <<: *build-args
     command: ["php", "artisan", "schedule:work"]
     env_file:
       - .env

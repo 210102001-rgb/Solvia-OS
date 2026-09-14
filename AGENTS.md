@@ -33,6 +33,7 @@ Laravel 12 (PHP `^8.2`, local 8.3) + Blade + Tailwind v4 (Vite) + Alpine. Classi
 - Required server `.env` (fail fast via `:?` guards, entrypoint also refuses to boot without `APP_KEY`): `APP_KEY` (generate once locally: `php artisan key:generate --show`), `APP_URL`, `DB_USERNAME` (must be NON-root, e.g. `novaos` — `MYSQL_USER` cannot be `root`), `DB_PASSWORD`, `DB_ROOT_PASSWORD`. `APP_DEBUG` is forced `false`. A `$` in secrets must be escaped as `$$`.
 - Deploy: first boot `docker compose exec app php artisan migrate --force --seed`; updates `migrate --force` manually or via `RUN_MIGRATIONS=true`. Entrypoint runs `php artisan optimize` at boot (config cached at runtime, never baked — cached config freezes env). App healthcheck hits `/up`.
 - Ops: backup via `docker compose exec db sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" novaos' > backup.sql` (replace db name as needed). No TLS in stack — terminate HTTPS in front (reverse proxy) and set `APP_URL=https://…`.
+- Regional mirrors: if the build host cannot reach `deb.debian.org` / `registry.npmjs.org` (e.g. China VPS), build with `APT_MIRROR=mirrors.tencent.com NPM_REGISTRY=https://registry.npmmirror.com docker compose up --build -d` (wired as `Dockerfile` `ARG`s via `x-build-args` in `compose.yaml`).
 - Docker daemon is not available in every environment — `php artisan config:clear`, `php -l`, and `composer test` remain the offline verification path.
 
 ## Conventions

@@ -3,16 +3,25 @@
 # container environment at runtime (see compose.yaml). OPcache has
 # validate_timestamps=0, so code changes require a rebuild, never a volume mount.
 
+# Build args for regions where official mirrors are unreachable
+# (e.g. Tencent/Aliyun VPS in China). Empty (default) keeps official sources.
+# Examples: APT_MIRROR=mirrors.tencent.com  NPM_REGISTRY=https://registry.npmmirror.com
+ARG APT_MIRROR=""
+ARG NPM_REGISTRY=""
+
 # ── Stage 1: frontend assets (Vite + Tailwind) ─────────────────────────────
 FROM node:20-alpine AS frontend
+ARG NPM_REGISTRY=""
 WORKDIR /app
 COPY package.json package-lock.json vite.config.js ./
 COPY resources ./resources
 COPY public ./public
-RUN npm ci && npm run build
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi \
+    && npm ci && npm run build
 
 # ── Stage 2: PHP runtime (Apache + PHP 8.3) ────────────────────────────────
 FROM php:8.3-apache-bookworm
+ARG APT_MIRROR=""
 
 ENV DEBIAN_FRONTEND=noninteractive \
     APACHE_DOCUMENT_ROOT=/var/www/html/public \
@@ -23,7 +32,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # System deps + PHP extensions Laravel 12 needs (mysql + sqlite drivers).
 # Retry apt-get update: Debian mirrors occasionally flake on first hit.
-RUN rm -rf /var/lib/apt/lists/* \
+# If APT_MIRROR is set (build arg), rewrite bookworm DEB822 sources to it first.
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|http://deb.debian.org|http://${APT_MIRROR}|g; s|http://security.debian.org|http://${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi \
+    && rm -rf /var/lib/apt/lists/* \
     && for i in 1 2 3; do apt-get update && break || { echo "apt-get update attempt $i failed, retrying..."; sleep 10; }; done \
     && apt-get install -y --no-install-recommends \
         git unzip curl ca-certificates \
